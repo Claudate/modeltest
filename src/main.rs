@@ -98,14 +98,25 @@ enum EndpointAction {
 
 /// egui 自带字体只有拉丁字形，中文必须挂系统 CJK 字体，否则整页方框。
 /// 一个候选都没找到时不 panic：继续用默认字体，界面至少不是空白。
+/// 平台按 cfg 分支：macOS 走系统字体路径；Windows 走 C:\Windows\Fonts。
 fn install_cjk_fonts(ctx: &egui::Context) {
-    // (路径, ttc 内的字面序号)。Hiragino Sans GB 是 macOS 上最稳的中文 UI 字体。
+    // (路径, ttc 内的字面序号，ttf 一律 0)。两个平台同一个数组形状，避免 cfg 分支类型不一致。
+    #[cfg(target_os = "windows")]
+    let candidates: [(&str, u32); 4] = [
+        ("C:\\Windows\\Fonts\\msyh.ttc", 0),   // 微软雅黑
+        ("C:\\Windows\\Fonts\\msyhbd.ttc", 0), // 微软雅黑 Bold
+        ("C:\\Windows\\Fonts\\simhei.ttf", 0), // 黑体
+        ("C:\\Windows\\Fonts\\Deng.ttf", 0),   // 等线
+    ];
+    // Hiragino Sans GB 是 macOS 上最稳的中文 UI 字体。
+    #[cfg(not(target_os = "windows"))]
     let candidates: [(&str, u32); 4] = [
         ("/System/Library/Fonts/Hiragino Sans GB.ttc", 0),
         ("/System/Library/Fonts/STHeiti Light.ttc", 0),
         ("/System/Library/Fonts/Supplemental/Arial Unicode.ttf", 0),
         ("/Library/Fonts/Arial Unicode.ttf", 0),
     ];
+
     for &(path, index) in candidates.iter() {
         let Ok(bytes) = std::fs::read(path) else {
             continue;

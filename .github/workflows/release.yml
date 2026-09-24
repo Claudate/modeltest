@@ -1,0 +1,82 @@
+name: release
+
+# 打 tag（v*）即触发双端打包并发布 Release：
+#   git tag v0.1.0 && git push origin v0.1.0
+# 两个构建 job 并行（mac arm64 / win x64），都产 zip；release job 聚合上传到 GitHub Release。
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  mac:
+    name: Package macOS (arm64)
+    # macos-latest = macOS 26 Arm64，默认 target 即 aarch64-apple-darwin，无需交叉编译。
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # package-app.sh 内部执行 T54 R1-R7（cargo clean / release 重建 / SHA+ mtime 比对 / manifest / zip）
+      - name: Package macOS .app + zip
+        run: bash scripts/package-app.sh
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ModelTest-macos-arm64
+          path: dist/ModelTest-macos-arm64.zip
+          if-no-files-found: error
+
+  windows:
+    name: Build Windows (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      # package-win.sh 平行对齐 T54：cargo clean / release / SHA + mtime 比对 / manifest / zip
+      - name: Package Windows portable dir + zip
+        shell: bash
+        run: bash scripts/package-win.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ModelTest-windows-x64
+          path: dist/ModelTest-windows-x64.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish Release
+    needs: [mac, windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download both artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+      - name: Print assets and checksums
+        run: |
+          ls -lh release-assets/
+          sha256sum release-assets/*
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG#v}"
+          # 从 Cargo.toml 读真实版本，核对 tag 对齐（防打错 tag）。
+          MANIFEST_VERSION="$(awk -F '"' '/^version *=/ {print $2; exit}' Cargo.toml)"
+          if [[ "$MANIFEST_VERSION" != "$VERSION" ]]; then
+            echo "tag $TAG 与 Cargo.toml version ($MANIFEST_VERSION) 不一致，拒绝发布" >&2
+            exit 1
+          fi
+          # 正文模板在 .github/release-notes.tpl.md（独立文件，反引号 markdown 无需在 YAML 里转义），
+          # 这里只把 __VERSION__ 占位符换成 tag 里的版本号。
+          sed "s/__VERSION__/${VERSION}/g" .github/release-notes.tpl.md > RELEASE.md
+          gh release create "$TAG" release-assets/* --title "ModelTest $VERSION" --notes-file RELEASE.md
+      - name: Verify release
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" --json tagName,assets --jq '.tagName, (.assets[].name)'

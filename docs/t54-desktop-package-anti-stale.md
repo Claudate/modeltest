@@ -1,13 +1,15 @@
 # T54 — 桌面打包防旧（anti-stale）
 
-> 真源：本仓库本地唯一。`scripts/package-app.sh` 每次执行**必须先读此文件并执行其中的硬规则**，否则打包失败。
+> 真源：本仓库本地唯一。`scripts/package-app.sh`（macOS）与 `scripts/package-win.sh`（Windows）每次执行**必须先读此文件并执行其中的硬规则**，否则打包失败。
 > 本项目是 egui/eframe 原生桌面程序，**禁止打成网页、禁止用浏览器打开交付**。
 
 ## 问题
 
 打包脚本 exit 0 但产物仍是旧 app：`cargo build` 吃 cache 未重编，`target/release/model-test` mtime 未变，用户双击看到旧 UI / 旧逻辑。
 
-## 规则（`package-app.sh` 必须执行的硬门槛）
+## 规则（`package-app.sh` / `package-win.sh` 必须执行的硬门槛）
+
+同一套门槛两平台脚本平行实现；平台差异只在命令细节（`shasum`→`sha256sum`、`ditto`→`tar -a`、`stat -f %m`→`stat -c %Y`），检查语义逐条对齐。
 
 ### R1 — 每次必须先读本文件
 
@@ -18,15 +20,16 @@
 
 - 每次打包先清 `dist/`，再 `cargo clean -p model-test`，然后 `cargo build --release`。
 - 保证主二进制 mtime 必然刷新。
+- macOS 产物取 `target/release/model-test`，Windows 取 `target/release/model-test.exe`；都在各自 runner 的原生 target 上构建，不加 `--target`。
 
 ### R3 — 产物 mtime 必须晚于仓库源 mtime
 
-- 打包完成后收集 `src/**/*.rs`、`Cargo.toml`、`Cargo.lock` 中最新的 mtime，与 `dist/ModelTest.app/Contents/MacOS/model-test` mtime 比较。
+- 打包完成后收集 `src/**/*.rs`、`Cargo.toml`、`Cargo.lock` 中最新的 mtime，与产物二进制 mtime 比较（mac：`dist/ModelTest.app/Contents/MacOS/model-test`；win：`dist/ModelTest-win/model-test.exe`）。
 - 若产物 mtime ≤ 源 mtime（含同秒），`STALE_ARTIFACT`，exit 1。
 
 ### R4 — 写入打包元数据
 
-- `ModelTest.app/Contents/Pack-manifest.json` 必须包含：
+- macOS：`ModelTest.app/Contents/Pack-manifest.json`；Windows：`ModelTest-win/Pack-manifest.json`（win 附 `platform: "windows-x86_64"`）。两者必须包含：
   - `packaged_at`：ISO 时间戳
   - `git_sha`：`git rev-parse HEAD`（无 git 则 `unknown`）
   - `git_dirty`：是否有未提交改动
@@ -37,6 +40,7 @@
 ### R5 — ZIP 内嵌 manifest
 
 - `dist/ModelTest-macos-arm64.zip` 内必须含 `ModelTest.app/Contents/Pack-manifest.json`。
+- `dist/ModelTest-windows-x64.zip` 内必须含 `ModelTest-win/Pack-manifest.json`。
 
 ### R6 — Info.plist 版本可溯源
 

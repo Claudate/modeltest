@@ -112,9 +112,21 @@ pub fn data_path() -> PathBuf {
     if let Ok(dir) = std::env::var("MODEL_TEST_DATA_DIR") {
         return PathBuf::from(dir).join("endpoints.json");
     }
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
-    PathBuf::from(home)
-        .join("Library/Application Support/model-test/endpoints.json")
+    #[cfg(target_os = "windows")]
+    {
+        // Windows 惯例：%LOCALAPPDATA%\model-test\endpoints.json；
+        // LOCALAPPDATA 取不到就退回 %APPDATA%（%USERPROFILE% 的 AppData\Roaming）。
+        let base = std::env::var("LOCALAPPDATA")
+            .or_else(|_| std::env::var("APPDATA"))
+            .unwrap_or_else(|_| ".".into());
+        return PathBuf::from(base).join("model-test").join("endpoints.json");
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
+        PathBuf::from(home)
+            .join("Library/Application Support/model-test/endpoints.json")
+    }
 }
 
 pub fn now_iso_utc() -> String {
