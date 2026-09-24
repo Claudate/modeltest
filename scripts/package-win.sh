@@ -107,26 +107,32 @@ if (( BIN_MT <= NEWEST_SRC )); then
 fi
 echo "==> R3 mtime ok (exe=$BIN_MT source=$NEWEST_SRC)"
 
-# R5 — zip 内嵌 manifest。Git Bash 的 Windows 环境不一定有 zip 命令，
-# 用 PowerShell 的 Compress-Archive 且必须把 Git 风格路径（/d/...）转成 Windows 路径（D:\...）。
-# zip 内条目以 ModelTest-win/ 为根，解压即得绿色目录。
-rm -f "$ZIP"
-if command -v zip >/dev/null 2>&1; then
-  (cd "$DIST" && zip -qr "$(basename "$ZIP")" ModelTest-win)
-elif command -v powershell >/dev/null 2>&1; then
-  if command -v cygpath >/dev/null 2>&1; then
-    WIN_DIR_WIN="$(cygpath -w "$WIN_DIR")"
-    ZIP_WIN="$(cygpath -w "$ZIP")"
-  else
-    WIN_DIR_WIN="$WIN_DIR"
-    ZIP_WIN="$ZIP"
-  fi
-  powershell -NoProfile -Command "Compress-Archive -Path '$WIN_DIR_WIN' -DestinationPath '$ZIP_WIN' -Force"
+# R5 — zip 内嵌 manifest。不依赖 git-bash 的 zip/unzip（Actions 的 Windows runner 上
+# 两者行为不可靠：zip 分支曾静默，unzip -Z1 也确认不到条目），全部交给 PowerShell
+# 原生 System.IO.Compression 压缩 + 读回校验，一步返回结果串判定。
+if command -v cygpath >/dev/null 2>&1; then
+  WIN_DIR_WIN="$(cygpath -w "$WIN_DIR")"
+  ZIP_WIN="$(cygpath -w "$ZIP")"
 else
-  fail "ZIP_TOOL_MISSING: 无 zip 或 powershell"
+  WIN_DIR_WIN="$WIN_DIR"
+  ZIP_WIN="$ZIP"
 fi
-if ! unzip -Z1 "$ZIP" | grep -F "ModelTest-win/Pack-manifest.json" >/dev/null; then
-  fail "MANIFEST_MISSING: zip 未包含 Pack-manifest.json"
+
+POWSCRIPT="
+Add-Type -AssemblyName System.IO.Compression.FileSystem;
+\$src='$WIN_DIR_WIN';
+\$dst='$ZIP_WIN';
+Remove-Item \$dst -ErrorAction SilentlyContinue;
+[System.IO.Compression.ZipFile]::CreateFromDirectory(\$src, \$dst);
+\$z=[System.IO.Compression.ZipFile]::OpenRead(\$dst);
+\$count=(\$z.Entries | Where-Object { \$_.FullName -match 'Pack-manifest\.json\$' }).Count;
+\$z.Dispose();
+if(\$count -gt 0) { 'ZIP_OK' } else { 'ZIP_MISSING_MANIFEST' }
+"
+RESULT="$(powershell -NoProfile -ExecutionPolicy Bypass -Command "$POWSCRIPT" 2>&1)"
+echo "==> powershell zip result: $RESULT"
+if [[ "$RESULT" != *"ZIP_OK"* ]]; then
+  fail "MANIFEST_MISSING: $RESULT"
 fi
 
 echo "==> packed $WIN_DIR"
