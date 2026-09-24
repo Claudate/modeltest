@@ -107,10 +107,17 @@ if (( BIN_MT <= NEWEST_SRC )); then
 fi
 echo "==> R3 mtime ok (exe=$BIN_MT source=$NEWEST_SRC)"
 
-# R5 — zip 内嵌 manifest。Windows 自带 tar(bsdtar)，扩展名 .zip + -a 自动压缩；
+# R5 — zip 内嵌 manifest。Git Bash 可能没有 bsdtar 的 zip 支持（tar -a 在 Windows
+# 上不一定按扩展名推断 zip），优先用 zip 命令；没有则退回 PowerShell Compress-Archive。
 # zip 内条目以 ModelTest-win/ 为根，解压即得绿色目录。
 rm -f "$ZIP"
-tar -a -c -f "$ZIP" -C "$DIST" ModelTest-win
+if command -v zip >/dev/null 2>&1; then
+  (cd "$DIST" && zip -qr "$(basename "$ZIP")" ModelTest-win)
+elif command -v powershell >/dev/null 2>&1; then
+  powershell -NoProfile -Command "Compress-Archive -Path '$WIN_DIR' -DestinationPath '$ZIP' -Force"
+else
+  fail "ZIP_TOOL_MISSING: 无 zip 或 powershell"
+fi
 if ! unzip -Z1 "$ZIP" | grep -F "ModelTest-win/Pack-manifest.json" >/dev/null; then
   fail "MANIFEST_MISSING: zip 未包含 Pack-manifest.json"
 fi
