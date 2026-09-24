@@ -1,6 +1,6 @@
 [package]
 name = "model-test"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "中转站模型验证工具 — 列出并校验中转站上的模型是否可用"
 
